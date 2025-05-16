@@ -20,13 +20,9 @@ Building a system to detect fraudulent financial transactions in real time. The 
 	•	Messages include:
 	•	transaction_id, account_id, timestamp, amount, location, device_id, channel
 
-⸻
-
 2. Schema Registry
 	•	Define schemas for each topic using Avro or JSON
 	•	Ensures consistent serialization/deserialization between NiFi → Kafka → Flink
-
-⸻
 
 3. NiFi (Data Ingestion & Enrichment)
 	•	Ingest from:
@@ -40,8 +36,6 @@ Building a system to detect fraudulent financial transactions in real time. The 
 	•	ConvertRecord (JSON to Avro)
 	•	UpdateRecord (enrich with NiFi LookupService)
 	•	PublishKafkaRecord_2_6
-
-⸻
 
 4. Flink + SQL Stream Builder (Real-Time Fraud Logic)
 
