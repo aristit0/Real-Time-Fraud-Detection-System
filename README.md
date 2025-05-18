@@ -1,104 +1,73 @@
-# Real-Time-Fraud-Detection-System
+## 🛡 Real-Time Fraud Detection System
 
-Use Case Overview:
+This project implements a real-time fraud detection pipeline using Kafka, Flink, NiFi, and Iceberg. The system ingests transactions, applies fraud detection logic, and stores flagged alerts in a queryable data lake format.
 
-Building a system to detect fraudulent financial transactions in real time. The system should:
-	•	Ingest transactions as they happen
-	•	Enrich with reference data (e.g., blacklist, geo data)
-	•	Identify suspicious patterns (e.g., multiple withdrawals in seconds, location mismatch)
-	•	Trigger alerts and store data for historical analysis
+---
 
-🧱 Architecture Overview:
-[Database/Apps/ATM] → NiFi → Kafka → Flink + SQL Stream Builder → Kafka/HBase/Phoenix → Alerts/Hive
-                                       ↘
-                                 Real-time Rules
+### 📥 Ingestion Layer: Kafka
 
-⚙️ Components and Responsibilities
+- **Source Topic:** `transaction.transaction.fraud_transaction_data`
+- **Format:** JSON (`payload.after.*`)
+- **Security:** SASL_SSL + Kerberos
+- **Startup Mode:** `group-offsets`
 
-1. Kafka (Stream Transport)
-	•	Source Topics: transactions, user_profile, geo_blacklist
-	•	Messages include:
-	•	transaction_id, account_id, timestamp, amount, location, device_id, channel
+---
 
-2. Schema Registry
-	•	Define schemas for each topic using Avro or JSON
-	•	Ensures consistent serialization/deserialization between NiFi → Kafka → Flink
+### 🧠 Processing Layer: Apache Flink SQL
 
-3. NiFi (Data Ingestion & Enrichment)
-	•	Ingest from:
-	•	REST APIs (mobile, web, ATM)
-	•	RDBMS (CDC via Debezium, JDBC polling)
-	•	Transform and enrich:
-	•	Add geolocation, device reputation, account type
-	•	Route to appropriate Kafka topic
+#### Flink Job Logic:
+- **Input Table:** `fraud_transaction_flattened`
+- **Output Table:** `fraud_alerts` (Kafka)
 
-💡 Example processors:
-	•	ConvertRecord (JSON to Avro)
-	•	UpdateRecord (enrich with NiFi LookupService)
-	•	PublishKafkaRecord_2_6
+#### Fraud Rules:
+1. **Account-Device Mismatch**: Same account on different devices within 5s
+2. **Device Location Anomaly**: Same device in multiple locations within 30s
+3. **Repeated High Spend**: Same account with >100k transactions within 10s
 
-4. Flink + SQL Stream Builder (Real-Time Fraud Logic)
+#### Output Fields:
+- `transaction_id`, `account_id`, `amount`, `fraud_type`, `flagged_time`
 
-Fraud detection examples:
-	•	Velocity check: 3+ transactions within 10 seconds
-	•	Geo anomaly: user logged in from Jakarta, then next ATM withdrawal from New York in 1 minute
-	•	High value: Amount > defined threshold for this account type
+---
 
-Use SQL Stream Builder (SSB) for rule-based detection:
-SELECT
-  account_id,
-  COUNT(*) AS txn_count,
-  TUMBLE_START(proctime, INTERVAL '10' SECOND) as window_start
-FROM
-  transactions
-GROUP BY
-  TUMBLE(proctime, INTERVAL '10' SECOND), account_id
-HAVING
-  txn_count > 3
+### 📤 Output Layer: Kafka (`fraud_alerts` topic)
 
-Or use pattern matching (CEP) for event sequences:
-SELECT *
-FROM PATTERN (
-  A -> B -> C
-  WHERE A.amount > 1000 AND B.amount > 1000 AND C.amount > 1000
-  WITHIN INTERVAL '30' SECONDS
-)
+- **Format:** Flat JSON
+- **Field of concern:** `flagged_time` uses `CURRENT_TIMESTAMP`
 
-5. Phoenix + HBase (Real-Time Data Store)
-	•	Store:
-	•	User profile cache (for joins)
-	•	Recent flagged events (for alert de-duplication)
-	•	Fast lookup/update of flags, counters, risk scores
+---
 
-💡 Example:
-	•	Table: fraud_flags
-	•	Columns: account_id, last_flagged_time, fraud_score
+### 🔄 Integration Layer: Apache NiFi
 
-6. Hive (Analytics & BI)
-	•	Archive all events
-	•	Build dashboards in Hue / Power BI / Looker
-	•	Train ML models for advanced fraud detection (offline)
+#### Flow:
+1. **ConsumeKafkaRecord_2_0** → reads from `fraud_alerts`
+2. **ConvertRecord** → parses JSON using defined schema
+3. **PutIceberg** → writes to Iceberg table
 
-7. Optional: Alerting System
-	•	Flink output → Kafka topic fraud_alerts
-	•	NiFi or microservice subscribes and triggers:
-	•	Email/SMS
-	•	Case creation in CRM
-	•	Risk engine updates
+#### Schema Highlights:
+- `flagged_time`: converted to `timestamp-millis` (Avro long)
+- `amount`: stored as string, optionally upgradable to `decimal(32,2)`
 
-📂 Folder Structure (Sample)
-fraud-detection/
-├── nifi/
-│   ├── templates/
-│   └── lookups/
-├── flink/
-│   ├── sql/
-│   └── cep/
-├── schema-registry/
-│   └── avro/
-├── kafka/
-│   └── topics.txt
-├── hive/
-│   └── table-definitions/
-├── phoenix/
-│   └── table-create.sql
+---
+
+### ❄ Iceberg Table
+
+- **Catalog:** Hive (`thrift://cdpm2.cloudeka.ai:9083`)
+- **Table:** `fraud_alerts.datamart.fraud_alerts`
+- **Format:** Parquet
+- **Storage:** HDFS (`/warehouse/tablespace/external/hive/datamart.db/fraud_alerts`)
+- **Properties:**
+  - `sink.parallelism = 1`
+  - `sink.commit-policy = success-file`
+  - `write.upsert.enabled = false`
+
+---
+
+### ✅ Notes
+
+- NiFi handles schema conversion (timestamp string → millis)
+- Flink and Spark access the same Iceberg table through Hive catalog
+- Iceberg supports SQL-based analysis, time travel, and optimized storage
+
+---
+
+Feel free to extend this pipeline with dashboards, alerting, or model-based scoring in the future.
