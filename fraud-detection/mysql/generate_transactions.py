@@ -11,7 +11,7 @@ DB_CONFIG = {
     'password': 'Admin123',
     'database': 'transaction'
 }
-TABLE_NAME = 'transaction_data'
+TABLE_NAME = 'fraud_transaction_data'
 TOTAL_ROWS = 1_000_000
 BATCH_SIZE = 1000
 DELAY_SECONDS = 1
